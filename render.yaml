@@ -1,0 +1,13 @@
+services:
+  - type: worker
+    name: aloc-extractor
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm run extract
+    envVars:
+      - key: SUPABASE_URL
+        value: https://oninbasktbcdyhunlikt.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false   # paste this in Render dashboard → Environment
+      - key: ALOC_API_KEY
+        sync: false   # paste this in Render dashboard → Environment

@@ -44,6 +44,19 @@ The `"Run extraction"` workflow runs `npm run extract` automatically.
 - `429 Too Many Requests` → script backs off automatically; lower `CONCURRENCY` to 2 in `extract.js` if persistent
 - Incomplete scopes at the end → just rerun `npm run extract` (safe)
 
+## Deploying to Render
+
+A `render.yaml` is included. Steps:
+1. Push this repo to GitHub.
+2. In [Render](https://render.com), create a new **Background Worker** from the repo — it will pick up `render.yaml` automatically.
+3. In the Render service's **Environment** settings, add the two secret values:
+   - `SUPABASE_SERVICE_ROLE_KEY` — from Supabase Dashboard → Project Settings → API
+   - `ALOC_API_KEY` — from your ALOC dashboard
+4. Deploy. The worker runs `npm run extract` and exits with `✅ DONE` when finished.
+5. If there are `⚠ INCOMPLETE` scopes at the end, trigger another deploy (it's idempotent — no duplicates).
+
+To run gap-fill only (skip subject/years that already have questions), change `startCommand` in `render.yaml` to `npm run gaps`.
+
 ## User Preferences
 
 - Keep the existing script structure — do not rewrite `extract.js` unless it errors
