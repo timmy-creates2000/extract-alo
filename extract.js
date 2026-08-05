@@ -39,9 +39,9 @@ const SUBJECT_SLUGS = [
 // Years to sweep. 2026 not released by ALOC yet — add it later when available.
 const YEARS = Array.from({ length: 2025 - 2001 + 1 }, (_, i) => 2001 + i) // 2001..2025
 
-const CONCURRENCY = 2        // parallel (subject,year) scopes. Gentle by default to avoid ALOC's
+const CONCURRENCY = Number(process.env.CONCURRENCY || 4)      // override via env: CONCURRENCY=8
                              // rate limit. Raise to 4 only if it's clearly not being throttled.
-const BATCH_DELAY_MS = 600   // pause between polls to the same scope (gentle)
+const BATCH_DELAY_MS = Number(process.env.BATCH_DELAY_MS || 300) // override via env: BATCH_DELAY_MS=150
 const DRY_STOP = 4           // stop a scope after N batches with 0 NEW questions (q returns fewer/call than m)
 const MAX_FAIL_STREAK = 8    // give up a scope after N consecutive network failures
 const GAPS_ONLY = process.env.GAPS_ONLY === '1'
@@ -54,7 +54,7 @@ const GAPS_ONLY = process.env.GAPS_ONLY === '1'
 // As of 2026-08 BOTH endpoints hang (HTTP 000) for our key from the origin IP — the throttle follows the
 // KEY, not the IP. Running from Replit's fresh datacenter IP is the test: if requests answer, the quota is
 // per-IP-per-key and this finishes; if they still hang, the quota is global to the key → wait/rotate key.
-const ENDPOINT = (process.env.ENDPOINT || 'q').toLowerCase()
+const ENDPOINT = (process.env.ENDPOINT || 'm').toLowerCase()
 const BATCH_N = Number(process.env.BATCH_N || 20) // only used by the /q endpoint
 const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS || 45000)
 
@@ -189,24 +189,25 @@ async function extractScope(subjectId, slug, year) {
     fails = 0
     hadSuccess = true
 
-    let fresh = 0
+    // Collect fresh normalised questions from this batch, then upsert in parallel
+    const toUpsert = []
     for (const raw of data) {
       const ref = raw.id != null ? String(raw.id) : ''
       if (!ref || seen.has(ref)) continue
       seen.add(ref)
       const norm = normalize(raw, year)
-      if (!norm) {
-        stats.skipped++
-        continue
-      }
-      try {
-        await upsertQuestion(subjectId, norm)
-        stats.added++ // note: "added" here counts every upsert; source_ref UNIQUE prevents dupes
-        count++
-        fresh++
-      } catch (e) {
-        stats.errors++
-      }
+      if (!norm) { stats.skipped++; continue }
+      toUpsert.push(norm)
+    }
+    const results = await Promise.all(
+      toUpsert.map((norm) =>
+        upsertQuestion(subjectId, norm).then(() => 'ok').catch(() => 'err')
+      )
+    )
+    let fresh = 0
+    for (const r of results) {
+      if (r === 'ok') { stats.added++; count++; fresh++ }
+      else { stats.errors++ }
     }
     dry = fresh === 0 ? dry + 1 : 0
     await sleep(BATCH_DELAY_MS)
