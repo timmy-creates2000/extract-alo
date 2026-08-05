@@ -1,0 +1,129 @@
+# Brief for Replit AI — ALOC → Supabase question extractor
+
+Copy everything below into Replit AI (or just upload the 3 files in this folder and tell it to run them).
+
+---
+
+## What I want you to do
+
+Run a **Node.js script that extracts JAMB UTME past questions from the ALOC v2 API and inserts
+them into my existing Supabase database.** The script is already written (`extract.js`). Your job is to:
+
+1. Create a **Node.js Repl**.
+2. Add the 3 files from this folder: `extract.js`, `seed-subjects.js`, `package.json`.
+3. Run `npm install`.
+4. Add my secrets (below) in the Repl **Secrets** tab.
+5. Run `node extract.js` and keep it running until it prints `✅ DONE`.
+6. If it prints any `⚠ ... INCOMPLETE` scopes at the end, run `node extract.js` again (it's safe — it never duplicates).
+
+That's it. Do **not** rewrite the script unless it errors — it's already correct and idempotent.
+
+---
+
+## Secrets to set in the Repl "Secrets" tab (Tools → Secrets)
+
+| Key | Value |
+|-----|-------|
+| `SUPABASE_URL` | `https://oninbasktbcdyhunlikt.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | *(paste my Supabase service_role key — from Supabase Dashboard → Project Settings → API)* |
+| `ALOC_API_KEY` | *(paste my ALOC AccessToken — from my ALOC dashboard)* |
+
+> ⚠️ The service_role key is a master key that bypasses all security. Only paste it into the
+> **Secrets** tab (encrypted), never into the code or a public file. I will rotate it after extraction finishes.
+
+---
+
+## How it works (so you understand it, don't need to change it)
+
+- **API:** `GET https://questions.aloc.com.ng/api/v2/m?subject=<slug>&year=<year>&type=utme`
+  with header `AccessToken: <ALOC_API_KEY>`.
+- ALOC has **no pagination** — `/m` returns a *random batch* each call. The script polls each
+  (subject, year) repeatedly and dedupes by the question's `id`, stopping when 3 batches in a row
+  return nothing new.
+- **17 subjects × years 2001–2025** = ~400 scopes, 2 running in parallel (gentle, to avoid ALOC's per-IP rate limit).
+- **Idempotent:** every question is upserted on `source_ref` (ALOC's own id, a UNIQUE column), so
+  stopping and re-running **never creates duplicates** — it just re-confirms/fills gaps.
+- The database already has ~1000 questions and all 17 subjects seeded. To only fill what's missing,
+  run `GAPS_ONLY=1 node extract.js` instead (skips subject/years that already have questions).
+
+### Response shape (for reference)
+```json
+{
+  "subject": "physics", "status": 200, "total": 40,
+  "data": [
+    {
+      "id": 554,
+      "question": "Find the value of ...",
+      "option": { "a": "7f", "b": "6f", "c": "15f", "d": "0.17f" },
+      "answer": "d",
+      "solution": "…explanation…",
+      "section": "",          // comprehension passage (English), else empty
+      "image": "",            // image URL if any
+      "category": "…topic…",
+      "examyear": "2019"
+    }
+  ]
+}
+```
+
+### Field mapping into Supabase
+| ALOC field | Supabase `question` column |
+|-----------|----------------------------|
+| `id` | `source_ref` (UNIQUE — dedupe key) |
+| `question` | `text` |
+| `option.a`–`d` | rows in `question_option` (label A–D; drop empty `e`) |
+| `answer` (e.g. `"d"`) | the option with matching label gets `is_correct = true` |
+| `solution` | `explanation` |
+| `section` | `passage` (comprehension reading text) |
+| `category` | `topic` |
+| `image` | `image_key` (raw URL for now; re-hosted later) |
+| `examyear` | `year` |
+
+Skips (logged, not fatal): questions with no id, empty text, fewer than 4 options, or not exactly 1 correct answer.
+
+---
+
+## The 17 official ALOC subject slugs (exact spellings — do not change)
+```
+english, mathematics, physics, chemistry, biology, englishlit, government,
+economics, commerce, accounting, geography, crk, irk, civiledu,
+currentaffairs, insurance, history
+```
+(Note: it's `irk` — Islamic Religious Knowledge — NOT `irs`. And Maths is `mathematics`, not `maths`.)
+
+---
+
+## Database schema (already created — do NOT recreate)
+
+The `subject`, `question`, and `question_option` tables already exist. Relevant columns:
+
+**`question`**: `id` (uuid, auto), `subject_id` (uuid → subject.id), `year` (int), `topic` (text),
+`text` (text, required), `passage` (text), `image_key` (text), `explanation` (text),
+`source_ref` (text, **UNIQUE**), `created_at`.
+
+**`question_option`**: `id` (uuid, auto), `question_id` (uuid → question.id), `label` (text, A–D),
+`text` (text), `image_key` (text), `is_correct` (bool).
+
+**`subject`**: `id` (uuid, auto), `name` (text, unique), `slug` (text, unique), `config` (jsonb).
+
+If for some reason the `subject` table is empty, run `node seed-subjects.js` first.
+
+---
+
+## Expected result
+
+When finished, the `question` table should hold **thousands** of questions across all 17 subjects
+and years 2001–2025 (English and a couple of core subjects have the most; some obscure subject/year
+combinations legitimately have few or none). Re-running is always safe.
+
+## If you hit problems
+- `429 Too Many Requests` from ALOC → the script already backs off automatically; just let it run. If it's constant, lower `CONCURRENCY` from 2 to 1 in `extract.js`.
+- **Requests time out / hang (HTTP 000)** → ALOC rate-limits by **IP address**. If this happens, wait ~30–60 min and re-run — the script is idempotent and resumes. Do NOT raise concurrency to "go faster"; that triggers the block. The current gentle defaults (concurrency 2, 600ms delay) are chosen specifically to avoid it.
+- `Missing env` error → a secret isn't set in the Secrets tab.
+- Subjects "not seeded" error → run `node seed-subjects.js`.
+- To keep it running after you close the browser tab, use Replit's **"Always On"** / deployment, or just leave the tab open until `✅ DONE`.
+
+## Note on speed
+The gentle defaults prioritize **not getting the IP rate-limited** over raw speed, because this runs
+unattended in the cloud. A full sweep may take a while — that's fine, let it finish. It's better to
+finish slowly in one run than to get blocked and have to wait for a cooldown.
