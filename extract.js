@@ -39,9 +39,9 @@ const SUBJECT_SLUGS = [
 // Years to sweep. 2026 not released by ALOC yet — add it later when available.
 const YEARS = Array.from({ length: 2025 - 2001 + 1 }, (_, i) => 2001 + i) // 2001..2025
 
-const CONCURRENCY = Number(process.env.CONCURRENCY || 4)      // override via env: CONCURRENCY=8
+const CONCURRENCY = Number(process.env.CONCURRENCY || 6)      // override via env: CONCURRENCY=8
                              // rate limit. Raise to 4 only if it's clearly not being throttled.
-const BATCH_DELAY_MS = Number(process.env.BATCH_DELAY_MS || 300) // override via env: BATCH_DELAY_MS=150
+const BATCH_DELAY_MS = Number(process.env.BATCH_DELAY_MS || 200) // override via env: BATCH_DELAY_MS=150
 const DRY_STOP = 4           // stop a scope after N batches with 0 NEW questions (q returns fewer/call than m)
 const MAX_FAIL_STREAK = 8    // give up a scope after N consecutive network failures
 const GAPS_ONLY = process.env.GAPS_ONLY === '1'
