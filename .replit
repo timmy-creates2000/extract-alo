@@ -10,3 +10,26 @@ expertMode = true
 
 [userenv.shared]
 SUPABASE_URL = "https://oninbasktbcdyhunlikt.supabase.co"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Run extraction"
+
+[[workflows.workflow]]
+name = "Run extraction"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run extract"
+
+[workflows.workflow.metadata]
+outputType = "console"
